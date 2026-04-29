@@ -265,6 +265,99 @@ GUI 中的高频动作包括：
 
 ![Hookers GUI Overview](docs/images/gui-overview.png)
 
+### 6.1 调试工具区怎么用
+
+中间这块“调试工具”面板，主要对应三类动作：脚本生成、对象分析、页面查询。它们都通过 [RpcService](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:13) 调用 `js/rpc.js` 完成，按钮逻辑在 [ui/main_window.py](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1372)。
+
+![GUI Tool Panel](docs/images/gui-tool-panel.png)
+
+使用这些按钮前，至少要先满足两点：
+
+1. 已点击“准备环境并刷新 App”
+2. 已选择目标 App
+
+如果当前已经有活动 Hook 会话，GUI 会优先复用当前上下文；如果没有，会先确保目标 App 进入可用状态。
+
+### 6.2 脚本生成
+
+输入框提示是：
+
+`输入类名或类名:方法，例如 com.demo.Test:onCreate`
+
+这里支持两种常见写法：
+
+- 只填类名
+  - 例如 `com.demo.Test`
+  - 会为这个类生成“全方法 hook”脚本
+- 填 `类名:方法`
+  - 例如 `com.demo.Test:onCreate`
+  - 会只针对这个方法生成脚本
+
+点击“生成 Hook 脚本”后，GUI 会：
+
+1. 调用 `rpc.js` 判断类是否存在
+2. 生成对应的 hook 代码
+3. 把脚本保存到 `workspaces/<package>/js/`
+4. 自动刷新左侧脚本下拉框，并尽量自动选中新生成的脚本
+
+对应代码见：
+
+- [RpcService.generate_hook_script()](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:126)
+- [MainWindow.generate_hook_script()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1372)
+
+### 6.3 对象分析
+
+对象分析区共用一个输入框：
+
+`输入对象 ID、类名或 View ID`
+
+这一区域的三个按钮分别对应：
+
+- “对象信息”
+  - 调用 `object_info`
+  - 用来查看某个对象或类的详细字段/结构信息
+- “对象解释”
+  - 调用 `object_to_explain`
+  - 在对象信息基础上做进一步解释
+- “View 信息”
+  - 调用 `view_info`
+  - 用来查看某个 View 的详细信息
+
+如果输入为空，GUI 会直接报错，不会发请求。对应逻辑见：
+
+- [MainWindow.inspect_target()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1134)
+- [MainWindow.show_object_info()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1444)
+- [MainWindow.show_object_explain()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1467)
+- [MainWindow.show_view_info()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1490)
+
+### 6.4 页面查询
+
+这一组不需要额外输入框：
+
+- “查看 Activity”
+  - 查询当前 App 的 Activity 信息
+- “查看 Service”
+  - 查询当前 App 的 Service 信息
+- “重启 App”
+  - 先停止当前活动会话，再重启 App，并刷新应用列表与 PID 状态
+
+对应入口见：
+
+- [MainWindow.show_activities()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1408)
+- [MainWindow.show_services()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1426)
+- [MainWindow.restart_current_app()](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:1513)
+
+### 6.5 结果会显示在哪里
+
+这些工具按钮的结果通常会显示在两个地方：
+
+- 右侧日志区
+  - 记录当前动作是否触发、是否成功
+- 非模态结果窗口
+  - Activity / Service / 对象 / View 查询结果会弹出单独窗口显示
+
+脚本生成动作则会把结果落到本地工作区，并在状态栏和弹窗中提示生成位置。
+
 ---
 
 ## 7. CLI 简要说明
