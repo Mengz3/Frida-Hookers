@@ -1,82 +1,108 @@
 # Hookers
 
-`Hookers` 是一个面向 Android 动态调试场景的本地工作台，核心目标是把：
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB)
+![Platform Windows](https://img.shields.io/badge/Platform-Windows-0078D4)
+![Status Experimental](https://img.shields.io/badge/Status-Experimental-orange)
 
-- 设备准备
-- `frida-server` 启动
-- `radar.dex` 部署
-- 目标 App 工作区初始化
-- Frida JS 注入
-- Activity / Service / Object / View 查询
+`Hookers` 是一个面向 Android 动态调试场景的本地工作台，用来把分散的 Frida 调试准备工作收敛成一套统一流程：
 
-收敛到一套统一的 CLI / GUI 工作流里。
+- 连接 ADB 设备
+- 启动匹配架构的 `frida-server`
+- 部署 `radar.dex`
+- 选择目标 App
+- 初始化该 App 的独立工作区
+- attach / spawn 注入 Frida JS
+- 查询 Activity / Service / Object / View
 
 它不是一个“通用 APK 分析器”，而是一个围绕**单个目标 App 持续调试**的本地工程化外壳。
 
-当前代码提供两个入口：
+当前代码提供两个入口，其中 **GUI 是推荐的主入口**：
 
-- CLI: `hookers.py`
 - GUI: `app_gui.py`
+- CLI: `hookers.py`
+
+![Hookers GUI Overview](docs/images/gui-overview.png)
+
+## Demo / 演示
+
+GUI 主界面：
+
+![Hookers GUI Demo](docs/images/gui-overview.gif)
+
+Hook 注入过程：
+
+![Hook Injection Demo](docs/images/hook-injection.gif)
 
 ---
 
-## 1. 这个项目解决什么问题
+## 1. 为什么用 Hookers / Why Hookers
 
 如果你平时做 Android Frida 调试，通常会不断重复这些动作：
 
-- 连接 ADB 设备
-- 确认设备 root 状态
-- 手动启动匹配架构的 `frida-server`
-- 部署调试辅助资源
-- 拉起目标 App
-- 准备脚本目录
-- attach / spawn 注入
-- 保存目标 App 的专属脚本和 APK
+- 手动确认设备和 root 状态
+- 手动启动 `frida-server`
+- 手动部署辅助资源
+- 每次重新准备脚本目录
+- 每次重新拉 APK、记包名、切 attach / spawn
 
-这个项目把上述流程拆成了明确的 service 层，再分别暴露给：
+`Hookers` 的目标不是替代 Frida，而是把这些重复劳动前移成可复用的工程结构。当前代码里，这套职责被拆成了清晰的 service 层：
 
-- 命令行交互流程
-- PySide6 图形界面
-
-从代码上看，核心职责由这些模块承担：
-
-- [core/device_service.py](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:15)
-- [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:31)
-- [core/session_service.py](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:57)
-- [core/rpc_service.py](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:13)
+- [core/device_service.py](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:15)：设备连接、root 检查、`frida-server`、`radar.dex`
+- [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:31)：`workspaces/<package>/` 工作区、脚本复制、APK 拉取
+- [core/session_service.py](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:57)：attach / spawn 会话生命周期
+- [core/rpc_service.py](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:13)：`rpc.js` 调用、页面查询、hook 脚本生成
 
 ---
 
-## 2. 当前能力
+## 2. 当前能力 / What It Does
 
-基于当前代码，项目已经支持：
+基于当前代码，这个项目已经支持：
 
-- 连接 ADB 设备
-- 检测 root / Magisk
-- 根据 CPU 架构选择并启动 `frida-server`
+- 自动连接 ADB 设备并检测 root / Magisk
+- 按 CPU 架构选择并启动 `frida-server`
 - 部署 `radar.dex`
-- 枚举设备上的 App
-- 把目标 App 拉到前台，或以 spawn 方式准备注入
-- 为目标 App 创建独立本地工作区
-- 自动复制内置 Frida JS 模板到工作区
-- 拉取目标 APK 到本地工作区
-- attach / spawn 注入指定脚本
+- 枚举设备上的 App，并把目标 App 拉到前台或以 spawn 方式准备注入
+- 为每个包名生成独立工作区 `workspaces/<package>/`
+- 自动复制内置 Frida JS 模板并拉取目标 APK
+- 通过 CLI 或 GUI 发起 attach / spawn 注入
 - 通过 `rpc.js` 查询 Activity / Service / Object / View 信息
 - 通过 `gs` / GUI 动作生成 hook 脚本
-- 在 GUI 中完成常见调试动作
 
 这些能力分别落在：
 
 - 设备准备：[core/device_service.py](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:27)
-- 工作区初始化：[core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:109)
+- 工作区初始化：[core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:112)
 - 会话生命周期：[core/session_service.py](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:139)
-- RPC 和 hook 生成：[core/rpc_service.py](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:73)
+- RPC 与 hook 生成：[core/rpc_service.py](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:108)
 
 ---
 
-## 3. 运行前提
+## 3. 运行流程 / Runtime Flow
 
-这个项目当前是**强依赖真实设备环境**的。
+下面这条链路就是项目最核心的使用路径：
+
+```mermaid
+flowchart LR
+    A["Connect ADB device"] --> B["Start frida-server"]
+    B --> C["Deploy radar.dex"]
+    C --> D["Refresh app list"]
+    D --> E["Select target app"]
+    E --> F["Create workspace"]
+    F --> G["Attach / Spawn"]
+    G --> H["Run scripts / RPC / hook generation"]
+```
+
+这条流程在 CLI 和 GUI 中都存在，但当前项目更推荐从 GUI 开始：
+
+- GUI 只负责装配 context + services，设备准备需要用户手动点击触发，见 [app_gui.py](C:/Users/mengze/Desktop/hooker-master/app_gui.py:15)
+- CLI 会在启动时直接执行 bootstrap，见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:75)
+
+---
+
+## 4. 快速开始 / Quick Start
+
+### 4.1 Requirements
 
 开始前请确认：
 
@@ -87,24 +113,15 @@
 - 目标设备已 root
 - `mobile-deploy/` 中存在与你设备架构匹配的 `frida-server`
 
-代码中的关键依赖和假设：
+当前代码里的关键假设：
 
-- `hookers.py` 启动时会直接执行 bootstrap 流程  
-  见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:75)
-- bootstrap 会依次调用：
-  - `connect()`
-  - `start_frida_server()`
-  - `deploy_radar_dex()`
-  - `refresh_applications()`  
-  见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:85)
-- `DeviceService.start_frida_server()` 当前只内建了 `arm` / `arm64` 资源选择逻辑  
-  见 [core/device_service.py](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:167)
+- `hookers.py` 启动时会直接执行 bootstrap，见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:75)
+- bootstrap 会依次调用 `connect()`、`start_frida_server()`、`deploy_radar_dex()`、`refresh_applications()`，见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:85)
+- `DeviceService.start_frida_server()` 当前只内建了 `arm` / `arm64` 的资源选择逻辑，见 [core/device_service.py](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:167)
 
 如果设备没有 root，或 `frida-server` 架构不匹配，核心流程基本无法正常工作。
 
----
-
-## 4. 安装依赖
+### 4.2 Install
 
 使用 `venv`：
 
@@ -131,9 +148,53 @@ uv pip install -r requirements.txt
 - `prompt_toolkit`
 - `jsbeautifier`
 
+### 4.3 First Run
+
+至少先确认这些本地资源存在：
+
+- `js/`
+- `mobile-deploy/radar.dex`
+- `mobile-deploy/frida-server-16.7.19-android-arm`
+- `mobile-deploy/frida-server-16.7.19-android-arm64`
+
+推荐的首次体验方式是 **先用 GUI 跑完整工作流**：
+
+```powershell
+python app_gui.py
+```
+
+GUI 启动后建议按这个顺序操作：
+
+1. 点击“准备环境并刷新 App”
+2. 选择目标 App
+3. 如有需要，点击“初始化工作目录并拉取 APK”
+4. 在左侧选择脚本，或用“生成 Hook 脚本”快速生成新脚本
+5. 选择 `Attach` 或 `Spawn`
+6. 点击“开始注入”
+7. 在右侧日志区查看输出，或继续使用 Activity / Service / Object / View 工具
+
+这套 GUI 编排都落在 [ui/main_window.py](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:63)，而入口装配在 [app_gui.py](C:/Users/mengze/Desktop/hooker-master/app_gui.py:15)。
+
+注意：GUI 启动后**不会自动准备设备环境**，你需要手动点击“准备环境并刷新 App”。
+
+如果你更偏向终端，也可以直接运行：
+
+```powershell
+python hookers.py
+```
+
+CLI 启动后会自动执行：
+
+1. 连接 ADB 设备
+2. 启动 `frida-server`
+3. 部署 `radar.dex`
+4. 刷新 App 列表
+
+这部分行为来自 [HookersCli.bootstrap()](C:/Users/mengze/Desktop/hooker-master/hookers.py:75)。
+
 ---
 
-## 5. 目录结构
+## 5. 仓库结构 / Repository Layout
 
 ```text
 hooker-master/
@@ -166,142 +227,11 @@ hooker-master/
 - `mobile-deploy/`：设备部署资源
 - `workspaces/<package-name>/`：按目标 App 自动生成的本地工作区
 
-工作区目录不是框架核心源码，而是运行时产物。  
-对应逻辑见 [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:36)。
+工作区目录不是框架核心源码，而是运行时产物。对应逻辑见 [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:36)。
 
 ---
 
-## 6. 快速开始
-
-### 6.1 检查本地资源
-
-至少确认以下资源存在：
-
-- `js/`
-- `mobile-deploy/radar.dex`
-- `mobile-deploy/frida-server-16.7.19-android-arm`
-- `mobile-deploy/frida-server-16.7.19-android-arm64`
-
-### 6.2 先跑 CLI
-
-```powershell
-python hookers.py
-```
-
-推荐第一次先用 CLI，因为它会在启动时直接暴露设备准备阶段是否正常。
-
-CLI 启动后会自动执行：
-
-1. 连接 ADB 设备
-2. 启动 `frida-server`
-3. 部署 `radar.dex`
-4. 刷新 App 列表
-
-这部分行为来自 [HookersCli.bootstrap()](C:/Users/mengze/Desktop/hooker-master/hookers.py:75)。
-
-### 6.3 再跑 GUI
-
-```powershell
-python app_gui.py
-```
-
-GUI 入口本身只负责组装依赖并创建主窗口：
-
-- 构造 `HookerContext`
-- 构造四个 service
-- 注入 `MainWindow`
-
-见 [app_gui.py](C:/Users/mengze/Desktop/hooker-master/app_gui.py:15)。
-
-注意：GUI 启动后**不会自动准备设备环境**，你需要手动点击“准备环境并刷新 App”。
-
----
-
-## 7. CLI 使用方式
-
-CLI 不是一次性命令工具，而是两层交互式工作流。
-
-### 7.1 第一层：App 选择层
-
-启动 `python hookers.py` 后，会先显示当前设备上的 App 列表。
-
-这里支持三类输入：
-
-- 包名，例如 `com.example.demo`
-- `refresh`
-- `exit` / `quit`
-
-对应逻辑见 [hookers.py](C:/Users/mengze/Desktop/hooker-master/hookers.py:369)。
-
-当你输入一个有效包名后，CLI 会：
-
-1. 确保目标 App 进入前台
-2. 收集 PID / UID / 版本 / APK 路径等上下文
-3. 初始化该 App 的本地工作区
-
-对应代码：
-
-- [HookersCli.select_app()](C:/Users/mengze/Desktop/hooker-master/hookers.py:232)
-- [DeviceService.ensure_app_in_foreground()](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:282)
-- [WorkspaceService.ensure_workspace()](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:164)
-
-### 7.2 第二层：单 App 调试层
-
-进入单 App 调试模式后，提示符会变成当前 App 名称。  
-这时围绕当前 App 可用的命令包括：
-
-- `help` / `h`
-- `activitys` / `a`
-- `services` / `s`
-- `object <id|class>` / `o <id|class>`
-- `oe <objectId>`
-- `view <id>` / `v <id>`
-- `gs <class[:method[(args)]]>`
-- `ls`
-- `attach <script.js>`
-- `spawn <script.js>`
-- `restart`
-- `pid`
-- `uid`
-- `exit` / `quit` / `q`
-
-命令表定义见 [HookersCli.print_debug_help()](C:/Users/mengze/Desktop/hooker-master/hookers.py:162)。
-
-### 7.3 attach 和 spawn
-
-- `attach`：附加到已运行进程
-- `spawn`：先拉起目标进程，再在更早阶段注入
-
-如果你需要尽早拦截启动逻辑、证书校验或初始化行为，通常应先尝试 `spawn`。
-
-真正的执行入口见：
-
-- [SessionService.attach_script()](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:139)
-- [SessionService.spawn_script()](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:159)
-
-### 7.4 脚本如何停止
-
-执行 `attach <script.js>` 或 `spawn <script.js>` 后，CLI 会维持当前会话并持续输出日志。
-
-停止方式：
-
-- 在 CLI 中按 `Ctrl + C`
-
-这部分行为在 [HookersCli.execute_script()](C:/Users/mengze/Desktop/hooker-master/hookers.py:203) 中实现。
-
-### 7.5 一个最小 CLI 示例
-
-```text
-python hookers.py
-hooker(包名): com.example.demo
-com.example.demo > ls
-com.example.demo > attach okhttp.js
-CTRL + C to stop >
-```
-
----
-
-## 8. GUI 使用方式
+## 6. GUI 使用方式
 
 GUI 是对同一套 `core/` service 的可视化编排，不是单独的另一套底层逻辑。
 
@@ -331,9 +261,59 @@ GUI 中的高频动作包括：
 - [app_gui.py](C:/Users/mengze/Desktop/hooker-master/app_gui.py:34)
 - [ui/main_window.py](C:/Users/mengze/Desktop/hooker-master/ui/main_window.py:63)
 
+当前 GUI 实际界面如下：
+
+![Hookers GUI Overview](docs/images/gui-overview.png)
+
 ---
 
-## 9. 工作区机制
+## 7. CLI 简要说明
+
+CLI 仍然可用，但现在更适合作为：
+
+- 启动时快速验证设备环境
+- 习惯终端工作流时做单 App 调试
+- 不想打开 GUI 时快速 attach / spawn 某个脚本
+
+启动 `python hookers.py` 后，它会先执行 bootstrap，然后进入两层交互式流程：
+
+1. App 选择层：输入包名、`refresh` 或 `exit`
+2. 单 App 调试层：围绕当前 App 执行 attach / spawn / RPC 查询 / hook 生成
+
+常用命令包括：
+
+- `ls`
+- `attach <script.js>`
+- `spawn <script.js>`
+- `activitys`
+- `services`
+- `object <id|class>`
+- `view <id>`
+- `gs <class[:method[(args)]]>`
+- `restart`
+
+如果你需要尽早拦截启动逻辑、证书校验或初始化行为，通常应先尝试 `spawn`。脚本运行后可在 CLI 中按 `Ctrl + C` 停止。
+
+相关入口见：
+
+- [HookersCli.print_debug_help()](C:/Users/mengze/Desktop/hooker-master/hookers.py:162)
+- [HookersCli.select_app()](C:/Users/mengze/Desktop/hooker-master/hookers.py:232)
+- [SessionService.attach_script()](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:176)
+- [SessionService.spawn_script()](C:/Users/mengze/Desktop/hooker-master/core/session_service.py:198)
+
+一个最小 CLI 示例：
+
+```text
+python hookers.py
+hooker(包名): com.example.demo
+com.example.demo > ls
+com.example.demo > attach okhttp.js
+CTRL + C to stop >
+```
+
+---
+
+## 8. 工作区机制
 
 这个项目的一个核心设计是：**每个包名一个本地工作区**。
 
@@ -360,12 +340,12 @@ workspaces/
 - 轻量工作区壳：[core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:74)
 - 首次完整初始化：[core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:109)
 
-内置模板脚本来自全局 `js/` 目录，初始化时会复制到 `workspaces/<package>/js/`，并把模板里默认包名替换成当前目标包名。  
-对应逻辑见 [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:96)。
+内置模板脚本来自全局 `js/` 目录，初始化时会复制到 `workspaces/<package>/js/`。  
+对应逻辑见 [core/workspace_service.py](C:/Users/mengze/Desktop/hooker-master/core/workspace_service.py:93)。
 
 ---
 
-## 10. 内置脚本与 RPC
+## 9. 内置脚本与 RPC
 
 `js/` 目录包含全局模板脚本，例如：
 
@@ -398,11 +378,11 @@ workspaces/
 
 ---
 
-## 11. 架构概览
+## 10. 架构概览
 
 这个项目已经从“单脚本堆逻辑”拆成了“共享上下文 + service + CLI/GUI 外壳”的结构。
 
-### 11.1 共享状态
+### 10.1 共享状态
 
 [core/models.py](C:/Users/mengze/Desktop/hooker-master/core/models.py:13) 定义了：
 
@@ -413,7 +393,7 @@ workspaces/
 
 其中 `HookerContext` 是 service 协作的状态中心。
 
-### 11.2 service 层
+### 10.2 service 层
 
 - [DeviceService](C:/Users/mengze/Desktop/hooker-master/core/device_service.py:15)
   - 设备连接、root 检测、前台切换、`frida-server` 启动、`radar.dex` 部署
@@ -424,7 +404,7 @@ workspaces/
 - [RpcService](C:/Users/mengze/Desktop/hooker-master/core/rpc_service.py:13)
   - 临时 RPC 调用、对象查询、hook 生成
 
-### 11.3 GUI 层
+### 10.3 GUI 层
 
 GUI 主要由这些文件组成：
 
@@ -437,7 +417,7 @@ GUI 主要由这些文件组成：
 
 ---
 
-## 12. 建议的阅读顺序
+## 11. 建议的阅读顺序
 
 如果你准备继续开发，建议按这个顺序阅读：
 
@@ -452,7 +432,7 @@ GUI 主要由这些文件组成：
 
 ---
 
-## 13. 注意事项
+## 12. 注意事项
 
 - 项目默认依赖 root 环境和 Frida 调试能力
 - `frida-server` 必须与设备架构匹配
@@ -470,7 +450,7 @@ GUI 主要由这些文件组成：
 
 ---
 
-## 14. 后续可继续完善的方向
+## 13. 后续可继续完善的方向
 
 当前最值得继续补的发布体验项：
 
@@ -484,8 +464,5 @@ GUI 主要由这些文件组成：
 
 ## 参考
 
-README 的整体重构顺序参考了你提到的项目：
 
 - [CreditTone/hooker](https://github.com/CreditTone/hooker)
-
-但本文档中的功能说明、流程描述和能力边界，均以当前仓库中的实际代码实现为准。

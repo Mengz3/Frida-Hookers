@@ -1079,6 +1079,24 @@ class MainWindow(QMainWindow):
         if not package_name:
             raise RuntimeError("请先选择一个目标 App")
 
+        current_app = self.deps.context.current_app
+        active_session = self.deps.context.active_session
+        # 对 GUI 来说，如果当前包名已经有活动会话且 PID 有效，
+        # 说明注入链路本身已经跑通，此时不再强制依赖 resumed-activity 检测。
+        # 这样可以避免 spawn 后点击 Activity/Service 等按钮时，
+        # 因 ROM/时序差异导致“前台未确认”误报。
+        if (
+            current_app is not None
+            and active_session is not None
+            and current_app.identifier == package_name
+            and current_app.pid is not None
+        ):
+            workspace_dir = self.deps.workspace_service.workspace_dir(current_app.identifier)
+            self.workspace_path_input.setText(str(workspace_dir))
+            self.workspace_path_input.setToolTip(str(workspace_dir))
+            self.refresh_app_status_panel(current_app.identifier)
+            return current_app.identifier
+
         app = self.deps.device_service.ensure_app_in_foreground(package_name)
         workspace_dir = self.deps.workspace_service.workspace_dir(app.identifier)
         self.workspace_path_input.setText(str(workspace_dir))
