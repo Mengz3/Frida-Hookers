@@ -303,13 +303,41 @@ class DeviceService:
 
         for _ in range(100):
             time.sleep(0.5)
-            if package_name in self.adb_shell(
-                "dumpsys activity activities | grep mResumedActivity"
-            ):
+            if self._is_app_in_foreground(package_name):
                 pid, name = self._find_running_process(package_name, refresh_apps=True)
                 if pid is not None:
                     return pid, name
         return self._find_running_process(package_name, refresh_apps=True)
+
+    def _get_foreground_state(self, package_name: str) -> tuple[bool, str]:
+        # 不同 Android 版本 / ROM 对前台 Activity 的 dumpsys 字段并不一致，
+        # 这里只要任一稳定信号命中目标包名，就认为该 App 已经在前台。
+        outputs = [
+            (
+                "mResumedActivity",
+                self.adb_shell("dumpsys activity activities | grep mResumedActivity"),
+            ),
+            (
+                "topResumedActivity",
+                self.adb_shell("dumpsys activity activities | grep topResumedActivity"),
+            ),
+            (
+                "mCurrentFocus",
+                self.adb_shell("dumpsys window windows | grep mCurrentFocus"),
+            ),
+            (
+                "mFocusedApp",
+                self.adb_shell("dumpsys window windows | grep mFocusedApp"),
+            ),
+        ]
+        combined = "\n".join(
+            f"{label}: {text}" for label, text in outputs if text
+        )
+        return package_name in combined, combined
+
+    def _is_app_in_foreground(self, package_name: str) -> bool:
+        is_foreground, _ = self._get_foreground_state(package_name)
+        return is_foreground
 
     def _wait_for_foreground_and_refresh_pid(
         self,
@@ -318,9 +346,7 @@ class DeviceService:
     ) -> tuple[Optional[int], Optional[str]]:
         for _ in range(100):
             time.sleep(0.2)
-            if package_name in self.adb_shell(
-                "dumpsys activity activities | grep mResumedActivity"
-            ):
+            if self._is_app_in_foreground(package_name):
                 break
         pid, name = self._find_running_process(package_name, refresh_apps=True)
         return pid, name or fallback_name
@@ -332,14 +358,13 @@ class DeviceService:
         *,
         reason: str,
     ) -> int:
-        foreground_output = self.adb_shell(
-            "dumpsys activity activities | grep mResumedActivity"
-        )
-        is_foreground = package_name in foreground_output
+        is_foreground, foreground_output = self._get_foreground_state(package_name)
         if pid is None or not is_foreground:
+            diagnostic = foreground_output or "<no foreground signals matched>"
             raise RuntimeError(
                 f"{reason}，但未确认 {package_name} 已稳定进入前台并暴露可用 PID。"
                 f" foreground={is_foreground}, pid={pid}"
+                f" diagnostic={diagnostic}"
             )
         return pid
 
@@ -354,10 +379,7 @@ class DeviceService:
                 proc_map[app.identifier] = (app.pid, app.name)
 
         is_running = package_name in proc_map
-        foreground_output = self.adb_shell(
-            "dumpsys activity activities | grep mResumedActivity"
-        )
-        is_foreground = package_name in foreground_output
+        is_foreground, _ = self._get_foreground_state(package_name)
 
         if is_running:
             if is_foreground:

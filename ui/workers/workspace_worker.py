@@ -7,7 +7,8 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 class WorkspaceWorker(QObject):
     # 负责在后台线程里完成“选中 App 后初始化工作目录”的重活。
-    # 这里会顺带把目标 App 拉到前台，并在首次初始化时拉取 APK。
+    # 这里不强制把目标 App 拉到前台，只准备 AppContext 并初始化工作区。
+    # 这样更符合 spawn 工作流：工作区准备和“界面是否已到前台”不是一回事。
     ready = Signal(str, str, str)
     failed = Signal(str)
     finished = Signal()
@@ -29,7 +30,7 @@ class WorkspaceWorker(QObject):
             self.workspace_service.context.emit(
                 f"[*] 已选中目标 App，开始初始化工作目录并检查 APK：{self.package_name}"
             )
-            app = self.device_service.ensure_app_in_foreground(self.package_name)
+            app = self.device_service.prepare_app_context(self.package_name)
             workspace_dir = self.workspace_service.ensure_workspace(app)
             script_dir = self.workspace_service.script_dir(self.package_name)
             self.ready.emit(
