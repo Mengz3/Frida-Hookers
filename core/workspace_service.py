@@ -27,6 +27,8 @@ BUILTIN_JS_FILES = [
     "activity_events.js",
 ]
 
+DEFAULT_PACKAGE_PLACEHOLDER = "com.smile.gifmaker"
+
 
 class WorkspaceService:
     # 负责工作目录、脚本资源和产物文件管理。
@@ -71,6 +73,47 @@ class WorkspaceService:
         path.write_text(text, encoding="utf-8", newline="")
         return path
 
+    def _render_builtin_script(self, js_file: str, package_name: str) -> Optional[str]:
+        src = self.context.js_dir / js_file
+        if not src.exists():
+            return None
+        text = src.read_text(encoding="utf-8", errors="ignore")
+        return text.replace(DEFAULT_PACKAGE_PLACEHOLDER, package_name)
+
+    def materialize_builtin_scripts(
+        self,
+        package_name: str,
+        script_dir: Path,
+        rewrite_existing: bool = False,
+    ) -> None:
+        # 把内置脚本物化到工作区，并在需要时修正仍保留默认包名占位值的旧副本。
+        script_dir.mkdir(parents=True, exist_ok=True)
+        for js_file in BUILTIN_JS_FILES:
+            rendered = self._render_builtin_script(js_file, package_name)
+            if rendered is None:
+                continue
+
+            target = script_dir / js_file
+            if not target.exists():
+                self.create_working_file(target, rendered)
+                continue
+
+            if not rewrite_existing:
+                continue
+
+            try:
+                existing = target.read_text(encoding="utf-8")
+            except OSError as exc:
+                self.context.emit(f"Error reading file {target}: {exc}")
+                continue
+
+            if DEFAULT_PACKAGE_PLACEHOLDER not in existing:
+                continue
+
+            updated = existing.replace(DEFAULT_PACKAGE_PLACEHOLDER, package_name)
+            if updated != existing:
+                self.create_working_file(target, updated)
+
     def ensure_workspace_shell(self, package_name: str) -> Path:
         # 先创建一个“轻量工作区壳”。
         #
@@ -90,13 +133,7 @@ class WorkspaceService:
         if any(script_dir.glob("*.js")):
             return package_dir
 
-        for js_file in BUILTIN_JS_FILES:
-            src = self.context.js_dir / js_file
-            if not src.exists():
-                continue
-            text = src.read_text(encoding="utf-8", errors="ignore")
-            text = text.replace("com.smile.gifmaker", package_name)
-            self.create_working_file(script_dir / js_file, text)
+        self.materialize_builtin_scripts(package_name, script_dir)
         return package_dir
 
     def pull_current_apk(self, app: AppContext) -> Path:
@@ -138,23 +175,22 @@ class WorkspaceService:
         self.create_working_file(package_dir / "objection.bat", objection_shell)
 
         # 为每个应用复制一份脚本副本，后续修改不会污染全局模板。
-        for js_file in BUILTIN_JS_FILES:
-            src = self.context.js_dir / js_file
-            if not src.exists():
-                continue
-            text = src.read_text(encoding="utf-8", errors="ignore")
-            text = text.replace("com.smile.gifmaker", app.identifier)
-            self.create_working_file(package_dir / "js" / js_file, text)
+        self.materialize_builtin_scripts(app.identifier, package_dir / "js")
 
         self.pull_current_apk(app)
         self.context.emit("工作目录第一次初始化完成")
         return package_dir
 
     def initialize_existing_workspace(self, app: AppContext) -> Path:
-        # 已有工作目录时补齐缺失的 APK 文件。
+        # 已有工作目录时补齐缺失的 APK 文件，并修正仍保留默认包名占位值的脚本。
         package_dir = self.workspace_dir(app.identifier)
         self.context.workspaces_dir.mkdir(parents=True, exist_ok=True)
         package_dir.mkdir(parents=True, exist_ok=True)
+        self.materialize_builtin_scripts(
+            app.identifier,
+            package_dir / "js",
+            rewrite_existing=True,
+        )
         apk_path = package_dir / f"{app.name.replace(' ', '')}_{app.version}.apk"
         self.context.current_local_apk_path = apk_path
         if apk_path.is_file():

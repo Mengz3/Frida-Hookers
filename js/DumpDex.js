@@ -39,8 +39,8 @@ Hook fork 的目的是防止目标进程通过创建子进程干扰 Frida。
     console.warn("[+] Fork hook: ACTIVE");
 })();
 
-/* 在这里填写目标包名 */
-const TARGET_PKG = "com.dexprotector.detector.envchecks";
+/* 内置模板默认包名，创建工作区时会被替换成当前目标 App 包名 */
+const TARGET_PKG = "com.smile.gifmaker";
 const SAFE_DIR = `/data/data/${TARGET_PKG}/`;
 
 // 常见加固 so 的名字特征，用于在 dlopen 阶段做“加固类型提示”。

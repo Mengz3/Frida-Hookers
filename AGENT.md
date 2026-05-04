@@ -12,8 +12,10 @@ This repository is a local Android dynamic analysis workbench built around:
 
 It provides two user-facing entry points:
 
-- CLI: `hookers.py`
 - GUI: `app_gui.py`
+- CLI: `hookers.py`
+
+At the current stage of the repository, the GUI is the recommended primary entry point for understanding and using the project. The CLI still matters, but the public-facing docs and recent improvements are centered on the GUI workflow.
 
 The project is primarily for working against one target Android app at a time, then creating a per-package local workspace under `workspaces/` for scripts, helper batch files, APK pulls, and hook outputs.
 
@@ -24,6 +26,7 @@ When understanding or modifying this project:
 - Treat `workspaces/com.secret.prettyhezi/` as out of scope unless the user explicitly asks for it.
 - That directory is a per-app workspace, not part of the core framework architecture.
 - Focus on `core/`, `ui/`, top-level Python entry files, `js/`, and `mobile-deploy/`.
+- Treat `docs/images/` as documentation assets for the GitHub README, not runtime code.
 
 ## High-Level Architecture
 
@@ -43,6 +46,7 @@ The codebase is split into:
 - `app_gui.py`
   - PySide6 GUI entrypoint.
   - Builds the shared context and injects service dependencies into the main window.
+  - Explicitly enables persistent RPC reuse for GUI actions.
 
 ### Shared State
 
@@ -130,6 +134,12 @@ Main responsibilities:
 - run RPC utility actions
 - display logs
 
+Important recent GUI behavior:
+
+- GUI utility actions reuse a persistent RPC session through `RpcService`
+- when a valid active hook session already exists, GUI inspection actions reuse the current app context instead of always forcing a new foreground check
+- the middle “debug tools” panel is a key surface for script generation, object inspection, and Activity/Service queries
+
 The GUI uses background workers to avoid blocking the Qt main thread during ADB/Frida operations.
 
 ### `ui/workers/`
@@ -179,6 +189,16 @@ These are part of runtime deployment, not business logic.
 
 ## Typical Runtime Flow
 
+### Recommended flow
+
+1. Run `python app_gui.py`
+2. Click “准备环境并刷新 App”
+3. Select target app
+4. Optionally initialize the workspace and pull APK
+5. Choose script or generate a hook script
+6. Start attach/spawn injection
+7. Use GUI debug tools to inspect Activity / Service / Object / View state
+
 ### CLI flow
 
 1. Run `python hookers.py`
@@ -197,19 +217,21 @@ These are part of runtime deployment, not business logic.
 3. Construct service instances
 4. Inject them into `MainWindow`
 5. Use GUI actions to prepare environment, choose app, initialize workspace, and start hook session
+6. Reuse persistent RPC calls for high-frequency inspection buttons
 
 ## Repository Layout To Prioritize
 
 When a new conversation needs to understand this repo quickly, read files in roughly this order:
 
-1. `core/models.py`
-2. `hookers.py`
-3. `app_gui.py`
-4. `core/device_service.py`
-5. `core/workspace_service.py`
-6. `core/session_service.py`
-7. `core/rpc_service.py`
-8. `ui/main_window.py`
+1. `README.md`
+2. `app_gui.py`
+3. `ui/main_window.py`
+4. `core/models.py`
+5. `core/device_service.py`
+6. `core/workspace_service.py`
+7. `core/session_service.py`
+8. `core/rpc_service.py`
+9. `hookers.py`
 
 ## Environment Assumptions
 
@@ -237,15 +259,18 @@ Python dependencies are listed in `requirements.txt`, mainly:
 - The GUI file `ui/main_window.py` is large and contains signs of iterative migration.
 - Per-package directories under `workspaces/` are generated workspaces and should not be mistaken for core framework modules.
 - `ui/main_window.py` still contains a large legacy comment block with retired helper methods, so future cleanup should distinguish active code from migration leftovers.
+- `README.md` now contains substantial product-facing guidance, screenshots, GIF demos, and GUI tool explanations; keep `AGENT.md` aligned with that high-level positioning.
 
 ## Practical Guidance For Future Agents
 
 - If the user asks “what is this project,” describe it as an Android Frida/ADB workbench with per-app workspaces under `workspaces/`.
+- Default to explaining the GUI workflow first unless the user explicitly asks about the CLI.
 - If the user asks to modify behavior, determine first whether the change belongs in:
   - device preparation
   - workspace creation
   - session lifecycle
   - RPC tooling
   - GUI orchestration
+- If the user is asking about screenshot-visible controls, inspect `ui/main_window.py` and `README.md` together because the README now documents the intended GUI usage surface.
 - Prefer reading `core/` first before changing `ui/`.
 - Do not treat `workspaces/com.secret.prettyhezi/` as core source code unless explicitly requested.

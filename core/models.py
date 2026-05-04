@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 
 LogHandler = Callable[[str], None]
+FridaServerVariant = Literal["default", "florida"]
 
 
 @dataclass
@@ -47,10 +48,14 @@ class HookerContext:
     mobile_deploy_dir: Path
     js_dir: Path
     workspaces_dir: Path
-    remote_frida_dir: str = "/data/local/tmp/frida"
+    remote_frida_dir: str = "/data/local/tmp/fr"
+    remote_default_frida_server_name: str = "fri-ser"
+    remote_florida_server_name: str = "flo-ser"
     remote_radar_dex: str = "/data/local/tmp/radar.dex"
+    frida_server_variant: FridaServerVariant = "default"
     frida_server_arm64: str = "frida-server-16.7.19-android-arm64"
     frida_server_arm: str = "frida-server-16.7.19-android-arm"
+    florida_server_arm64: str = "florida-server-16.7.19"
     adb_device: Any = None
     frida_device: Any = None
     apps: list[AppRecord] = field(default_factory=list)

@@ -72,6 +72,10 @@ class MainWindow(QMainWindow):
     # 6. 在右侧面板实时查看日志
     log_emitted = Signal(str)
     MAX_LOG_RECORDS = 3000
+    SERVER_VARIANTS = (
+        ("正常 Frida sever", "default"),
+        ("过检测 Florid sever", "florida"),
+    )
 
     def __init__(self, deps: MainWindowDependencies) -> None:
         super().__init__()
@@ -103,6 +107,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Hookers GUI 工作台")
         self.resize(1500, 920)
         self._build_ui()
+        self.sync_frida_server_variant()
         self._apply_styles()
         self.update_script_root_display()
         self.refresh_script_list()
@@ -281,11 +286,15 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(10)
         layout.addLayout(form)
 
-        env_label = QLabel("脚本来源")
-        self.script_source_hint = QLabel("当前目录")
-        self.script_source_hint.setObjectName("mutedLabel")
-        form.addWidget(env_label, 0, 0)
-        form.addWidget(self.script_source_hint, 0, 1)
+        server_label = QLabel("Frida sever选择")
+        self.frida_server_combo = QComboBox()
+        self.frida_server_combo.setEditable(False)
+        self.frida_server_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        for label, variant in self.SERVER_VARIANTS:
+            self.frida_server_combo.addItem(label, variant)
+        self.frida_server_combo.currentIndexChanged.connect(self.on_frida_server_variant_changed)
+        form.addWidget(server_label, 0, 0)
+        form.addWidget(self._with_dropdown_marker(self.frida_server_combo), 0, 1)
 
         self.refresh_apps_button = QPushButton("准备环境并刷新 App")
         self.refresh_apps_button.clicked.connect(self.start_device_prepare)
@@ -624,6 +633,11 @@ class MainWindow(QMainWindow):
         self.script_dir_input.setText(display)
         self.script_dir_input.setToolTip(str(self.script_root))
 
+    def clear_workspace_display(self) -> None:
+        # 未选中 App 或重新准备环境时，清掉上一次遗留的工作目录显示。
+        self.workspace_path_input.clear()
+        self.workspace_path_input.setToolTip("")
+
     def _handle_log_from_worker(self, message: str) -> None:
         # 任何线程里的日志都不要直接操作 Qt 控件，
         # 统一转成信号，交回主线程更新界面。
@@ -777,6 +791,7 @@ class MainWindow(QMainWindow):
     def set_busy(self, busy: bool, message: str | None = None) -> None:
         # 统一管理按钮禁用状态，避免多个分支各自写一套启停逻辑。
         self.refresh_apps_button.setDisabled(busy)
+        self.frida_server_combo.setDisabled(busy)
         # 活动会话存在时，不允许再次启动注入。
         self.start_hook_button.setDisabled(busy or self.deps.context.active_session is not None)
         self.select_script_dir_button.setDisabled(busy)
@@ -809,7 +824,6 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         self.script_root = Path(selected)
-        self.script_source_hint.setText(self.script_root.name or str(self.script_root))
         self.update_script_root_display()
         self.refresh_script_list()
 
@@ -899,7 +913,7 @@ class MainWindow(QMainWindow):
         package_name = self.selected_package_name()
         self.deps.rpc_service.invalidate_persistent_session()
         if not package_name:
-            self.workspace_path_input.clear()
+            self.clear_workspace_display()
             self.prepare_workspace_button.setDisabled(True)
             self.refresh_app_status_panel(None)
             return
@@ -912,7 +926,6 @@ class MainWindow(QMainWindow):
         self.workspace_path_input.setToolTip(str(workspace_dir))
 
         self.script_root = script_dir
-        self.script_source_hint.setText(f"{package_name}/js")
         self.update_script_root_display()
         self.refresh_script_list()
         self.refresh_app_status_panel(package_name)
@@ -964,7 +977,6 @@ class MainWindow(QMainWindow):
         self.workspace_path_input.setText(workspace_dir)
         self.workspace_path_input.setToolTip(workspace_dir)
         self.script_root = Path(script_dir)
-        self.script_source_hint.setText(f"{package_name}/js")
         self.update_script_root_display()
         self.refresh_script_list()
         self.refresh_app_status_panel(package_name)
@@ -978,6 +990,19 @@ class MainWindow(QMainWindow):
         if self.device_thread is not None:
             return
 
+        self.sync_frida_server_variant()
+        self.clear_workspace_display()
+        self.app_combo.blockSignals(True)
+        self.app_combo.setCurrentIndex(-1)
+        self.app_combo.blockSignals(False)
+        self.prepare_workspace_button.setDisabled(True)
+        self.refresh_app_status_panel(None)
+        self.script_root = self.deps.context.js_dir
+        self.update_script_root_display()
+        self.refresh_script_list()
+        self.append_log(
+            f"[*] 本次准备环境使用的 Frida Server：{self.frida_server_combo.currentText()}"
+        )
         self.append_log("[*] 开始准备设备环境并刷新 App 列表...")
         self.set_busy(True, "正在准备设备环境")
 
@@ -997,6 +1022,23 @@ class MainWindow(QMainWindow):
         self.device_thread.finished.connect(self.device_thread.deleteLater)
         self.device_thread.finished.connect(self._clear_device_thread)
         self.device_thread.start()
+
+    def current_frida_server_variant(self) -> str:
+        value = self.frida_server_combo.currentData()
+        if value is None:
+            return "default"
+        return str(value)
+
+    def sync_frida_server_variant(self) -> None:
+        self.deps.context.frida_server_variant = self.current_frida_server_variant()
+
+    def on_frida_server_variant_changed(self) -> None:
+        self.sync_frida_server_variant()
+        label = self.frida_server_combo.currentText() or "默认 Frida Server"
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage(f"当前 Frida Server 已切换为：{label}")
+        if hasattr(self, "log_console"):
+            self.append_log(f"[*] 当前 Frida Server 类型：{label}")
 
     def _clear_device_thread(self) -> None:
         # 把 Python 层的引用清空，允许后续再次点击“准备环境”。
@@ -1019,6 +1061,7 @@ class MainWindow(QMainWindow):
         self.app_combo.setCurrentIndex(-1)
         self.app_combo.blockSignals(False)
         self.prepare_workspace_button.setDisabled(True)
+        self.clear_workspace_display()
 
         self.set_busy(False, f"已同步设备 {len(apps)} 个应用")
         self.append_log(f"[v] 已同步设备 {len(apps)} 个进程/应用")
@@ -1030,7 +1073,7 @@ class MainWindow(QMainWindow):
             self.current_state_label.setText("状态：环境已就绪，但没有枚举到应用")
             self.append_log("[!] 准备已完成，但当前没有枚举到可选择的 APK 包名。")
             QMessageBox.warning(self, "未发现应用", "准备已完成，但当前没有枚举到可选择的 APK 包名。")
-            self.workspace_path_input.clear()
+            self.clear_workspace_display()
 
         self.refresh_app_status_panel()
 
@@ -1156,135 +1199,6 @@ class MainWindow(QMainWindow):
             raise RuntimeError("请输入对象 ID、类名或 View ID")
         return target
 
-    """
-
-    def _legacy_generate_hook_script(self) -> None:
-        # GUI 版 gs 命令：输入类名或类名:方法后直接生成脚本到当前包名工作目录。
-        hook_target = self.hook_target_input.text().strip()
-        if not hook_target:
-            QMessageBox.warning(self, "缺少 Hook 目标", "请输入类名或类名:方法。")
-            return
-
-        try:
-            self.set_busy(True, "正在生成 Hook 脚本")
-            package_name = self.ensure_current_app_ready()
-            script_path = self.deps.rpc_service.generate_hook_script(hook_target)
-            self.append_log(f"[TOOL] 已生成 Hook 脚本：{script_path}")
-
-            self.script_root = self.deps.workspace_service.script_dir(package_name)
-            self.script_source_hint.setText(f"{package_name}/js")
-            self.update_script_root_display()
-            self.refresh_script_list()
-
-            target_resolved = str(script_path.resolve())
-            for index in range(self.script_combo.count()):
-                if self.script_combo.itemData(index) == target_resolved:
-                    self.script_combo.setCurrentIndex(index)
-                    break
-
-            self.status_bar.showMessage(f"Hook 脚本已生成：{script_path.name}")
-            QMessageBox.information(self, "生成成功", f"脚本已生成到：\n{script_path}")
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_show_activities(self) -> None:
-        # GUI 版 activitys 命令。
-        try:
-            self.set_busy(True, "正在查询 Activity")
-            package_name = self.ensure_current_app_ready()
-            result = self.deps.rpc_service.activitys()
-            self.append_log(f"[TOOL] 已获取 {package_name} 的 Activity 信息")
-            self.show_result_dialog("Activity 列表", self.format_result_text(result))
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_show_services(self) -> None:
-        # GUI 版 services 命令。
-        try:
-            self.set_busy(True, "正在查询 Service")
-            package_name = self.ensure_current_app_ready()
-            result = self.deps.rpc_service.services()
-            self.append_log(f"[TOOL] 已获取 {package_name} 的 Service 信息")
-            self.show_result_dialog("Service 列表", self.format_result_text(result))
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_show_object_info(self) -> None:
-        # GUI 版 object_info 命令。
-        try:
-            self.set_busy(True, "正在查询对象信息")
-            package_name = self.ensure_current_app_ready()
-            target = self.inspect_target()
-            result = self.deps.rpc_service.object_info(target)
-            self.append_log(f"[TOOL] 已获取 {package_name} 的对象信息：{target}")
-            self.show_result_dialog(f"对象信息 - {target}", self.format_result_text(result))
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_show_object_explain(self) -> None:
-        # GUI 版 object_to_explain 命令。
-        try:
-            self.set_busy(True, "正在解释对象")
-            package_name = self.ensure_current_app_ready()
-            target = self.inspect_target()
-            result = self.deps.rpc_service.object_to_explain(target)
-            self.append_log(f"[TOOL] 已获取 {package_name} 的对象解释：{target}")
-            self.show_result_dialog(f"对象解释 - {target}", self.format_result_text(result))
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_show_view_info(self) -> None:
-        # GUI 版 view_info 命令。
-        try:
-            self.set_busy(True, "正在查询 View 信息")
-            package_name = self.ensure_current_app_ready()
-            target = self.inspect_target()
-            result = self.deps.rpc_service.view_info(target)
-            self.append_log(f"[TOOL] 已获取 {package_name} 的 View 信息：{target}")
-            self.show_result_dialog(f"View 信息 - {target}", self.format_result_text(result))
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    def _legacy_restart_current_app(self) -> None:
-        # GUI 版 restart 命令。重启后顺手刷新一次应用列表，让 PID 等状态同步回来。
-        try:
-            self.set_busy(True, "正在重启目标 App")
-            package_name = self.ensure_current_app_ready()
-            if self.deps.context.active_session is not None:
-                # 先温和停止当前会话，避免应用重启后留下失效的旧 session。
-                self.deps.session_service.stop_active_session()
-            self.deps.session_service.restart_current_app()
-            self.append_log(f"[TOOL] 已重启 App：{package_name}")
-
-            apps = self.deps.device_service.refresh_applications()
-            self.on_apps_ready(
-                [
-                    {"name": app.name, "identifier": app.identifier, "pid": app.pid}
-                    for app in apps
-                ]
-            )
-            current_index = self.app_combo.findData(package_name)
-            if current_index >= 0:
-                self.app_combo.setCurrentIndex(current_index)
-        except Exception as exc:
-            self.on_worker_failed(str(exc))
-        finally:
-            self.set_busy(False, "环境已就绪")
-
-    """
-
     def start_hook(self) -> None:
         # 启动“开始注入”后台任务。
         # 第一版只支持单会话，所以有 hook_thread 时直接忽略重复点击。
@@ -1391,7 +1305,6 @@ class MainWindow(QMainWindow):
         script_path = Path(str(payload["script_path"]))
         self.append_log(f"[TOOL] Generated hook script: {script_path}")
         self.script_root = self.deps.workspace_service.script_dir(package_name)
-        self.script_source_hint.setText(f"{package_name}/js")
         self.update_script_root_display()
         self.refresh_script_list()
 
@@ -1545,13 +1458,18 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         # 关闭窗口时尽量做一次温和清理：
         # 1. 停止当前 Hook
-        # 2. 不强杀线程，让 Qt 走正常收尾流程
+        # 2. 清理 /data/local/tmp/fr 下部署过的 sever 文件
+        # 3. 不强杀线程，让 Qt 走正常收尾流程
         try:
             self.deps.rpc_service.invalidate_persistent_session()
         except Exception:
             pass
         try:
             self.deps.session_service.stop_active_session()
+        except Exception:
+            pass
+        try:
+            self.deps.device_service.cleanup_remote_frida_files()
         except Exception:
             pass
         super().closeEvent(event)

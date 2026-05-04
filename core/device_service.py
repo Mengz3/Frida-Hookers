@@ -195,15 +195,81 @@ class DeviceService:
             return "x86"
         return "arm64"
 
+    def get_frida_server_variant_label(self) -> str:
+        if self.context.frida_server_variant == "florida":
+            return "过检测 Florid sever"
+        return "正常 Frida sever"
+
+    def get_remote_frida_server_name(self) -> str:
+        if self.context.frida_server_variant == "florida":
+            return self.context.remote_florida_server_name
+        return self.context.remote_default_frida_server_name
+
+    def get_all_remote_frida_server_names(self) -> list[str]:
+        return [
+            self.context.remote_default_frida_server_name,
+            self.context.remote_florida_server_name,
+        ]
+
     def get_frida_server_file(self) -> str:
         cpu_arch = self.get_cpu_arch()
+        variant = self.context.frida_server_variant
+        if variant == "florida":
+            if cpu_arch != "arm64":
+                raise RuntimeError(
+                    f"Florida 当前仅支持 arm64 设备，当前架构为: {cpu_arch}"
+                )
+            return self.context.florida_server_arm64
         if cpu_arch == "arm64":
             return self.context.frida_server_arm64
         if cpu_arch == "arm":
             return self.context.frida_server_arm
         raise RuntimeError(
-            f"您的 CPU 架构暂不支持: {cpu_arch}。请手动启动 frida-server。"
+            f"当前 Frida Server 暂不支持设备架构: {cpu_arch}。请手动启动。"
         )
+
+    def get_remote_frida_server_path(self) -> str:
+        return f"{self.context.remote_frida_dir}/{self.get_remote_frida_server_name()}"
+
+    def get_remote_server_pid(self, remote_server_name: str) -> Optional[str]:
+        output = self.run_root_cmd(
+            f"pidof {remote_server_name} 2>/dev/null || true"
+        ).strip()
+        if not output:
+            return None
+        return output.split()[0]
+
+    def cleanup_remote_frida_files(self) -> None:
+        remote_dir = self.context.remote_frida_dir
+        if remote_dir != "/data/local/tmp/fr":
+            raise RuntimeError(f"拒绝清理非预期目录: {remote_dir}")
+        if self.context.adb_device is None:
+            return
+        if not self.is_root():
+            self.context.emit("设备没有被 root，跳过远端 Frida 清理")
+            return
+
+        if not self.remote_dir_exists(remote_dir):
+            return
+
+        stopped_any = False
+        for remote_server_name in self.get_all_remote_frida_server_names():
+            pid = self.get_remote_server_pid(remote_server_name)
+            if pid is None:
+                continue
+            self.context.emit(
+                f"检测到远端 {remote_server_name} 进程正在运行 (pid={pid})，准备停止"
+            )
+            self.run_root_cmd(f"kill -9 {pid}")
+            stopped_any = True
+        if stopped_any:
+            time.sleep(0.5)
+
+        self.context.emit(f"清理远端 Frida 目录: {remote_dir}")
+        files = " ".join(
+            f"{remote_dir}/{name}" for name in self.get_all_remote_frida_server_names()
+        )
+        self.run_root_cmd(f"rm -f {files} 2>/dev/null || true")
 
     def remote_file_exists(self, path: str) -> bool:
         result = self.adb_shell(f"test -f {path} && echo exists || echo missing")
@@ -245,8 +311,6 @@ class DeviceService:
         self.run_root_cmd(f"chmod 755 {self.context.remote_radar_dex}")
 
     def start_frida_server(self) -> None:
-        if self.is_frida_environment_ready():
-            return
         if not self.is_root():
             raise RuntimeError("设备没有被 root，无法启动 frida-server")
         if self.is_magisk_root():
@@ -255,29 +319,42 @@ class DeviceService:
             )
 
         frida_server_file = self.get_frida_server_file()
+        remote_file = self.get_remote_frida_server_path()
+        self.context.emit(
+            "当前选择的 Frida Server: "
+            f"{self.get_frida_server_variant_label()} ({frida_server_file}) -> {remote_file}"
+        )
+
         local_frida_server = self.context.mobile_deploy_dir / frida_server_file
         if not local_frida_server.exists():
-            raise FileNotFoundError(f"缺少本地 frida-server 文件: {local_frida_server}")
+            server_kind = "florida-server" if self.context.frida_server_variant == "florida" else "frida-server"
+            raise FileNotFoundError(f"缺少本地 {server_kind} 文件: {local_frida_server}")
 
-        remote_file = f"{self.context.remote_frida_dir}/{frida_server_file}"
         if not self.remote_dir_exists(self.context.remote_frida_dir):
             self.run_root_cmd(f"mkdir -p {self.context.remote_frida_dir}")
-        if not self.remote_file_exists(remote_file):
-            self.push_file_to_remote(local_frida_server, "/sdcard/")
-            self.run_root_cmd(f"mv /sdcard/{frida_server_file} {remote_file}")
-            self.run_root_cmd(f"chmod 755 {remote_file}")
+        self.cleanup_remote_frida_files()
+
+        remote_server_name = self.get_remote_frida_server_name()
+        temp_remote = f"/sdcard/{remote_server_name}"
+        self.push_file_to_remote(local_frida_server, temp_remote)
+        self.run_root_cmd(f"mv {temp_remote} {remote_file}")
+        self.run_root_cmd(f"chmod 755 {remote_file}")
 
         self.run_root_cmd(
-            f"cd {self.context.remote_frida_dir} && ./{frida_server_file} > /sdcard/f_server.log 2>&1 &",
+            f"cd {self.context.remote_frida_dir} && ./{remote_server_name} > /sdcard/f_server.log 2>&1 &",
             read_output=False,
         )
 
         for _ in range(20):
             if self.is_frida_environment_ready():
-                self.context.emit("frida-server 启动成功")
+                self.context.emit(
+                    f"Frida Server 启动成功: {remote_file} (来源: {frida_server_file})"
+                )
                 return
             time.sleep(0.5)
-        raise RuntimeError("frida-server 启动失败，请检查权限或手动启动。")
+        raise RuntimeError(
+            f"Frida Server 启动失败: {remote_file}。请检查权限或手动启动。"
+        )
 
     def refresh_applications(self) -> list[AppRecord]:
         self.context.frida_device = self._get_frida_device()
